@@ -53,7 +53,7 @@ export function renderGatewayHandler(base44: any) {
     return client.asServiceRole;
   };
 
-  const setting = async (key: string, dflt: string): Promise<string> => {
+  const setting = async (svc: any, key: string, dflt: string): Promise<string> => {
     try {
       const rec = await svc.entities.SystemSettings.list({ filter: { key }, limit: 1 });
       const r = asArr(rec);
@@ -61,26 +61,26 @@ export function renderGatewayHandler(base44: any) {
     } catch { return dflt; } // אפליקציה בלי SystemSettings — ברירות מחדל
   };
 
-  const authed = async (req: Request): Promise<boolean> => {
+  const authed = async (svc: any, req: Request): Promise<boolean> => {
     const hdr = (req.headers.get('x-api-key') || req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
     const fromEnv = (Deno as any).env?.get?.('RENDER_API_KEY') || '';
-    const fromSettings = await setting('render_api_keys', '');
+    const fromSettings = await setting(svc, 'render_api_keys', '');
     const allowed = [fromEnv, ...fromSettings.split(',').map((s: string) => s.trim())].filter(Boolean);
     if (!allowed.length) return true; // אין מפתחות מוגדרים = פתוח (החלטת המפעיל)
     return allowed.includes(hdr);
   };
 
-  const budgetState = async () => {
-    const capPerJob = Number(await setting('render_max_credits_per_job', '400'));
-    const monthlyMax = Number(await setting('render_monthly_max', '8000'));
+  const budgetState = async (svc: any) => {
+    const capPerJob = Number(await setting(svc, 'render_max_credits_per_job', '400'));
+    const monthlyMax = Number(await setting(svc, 'render_monthly_max', '8000'));
     let spend = 0;
-    try { spend = Number(JSON.parse(await setting('render_spend', '{}')).credits || 0); } catch { spend = 0; }
+    try { spend = Number(JSON.parse(await setting(svc, 'render_spend', '{}')).credits || 0); } catch { spend = 0; }
     return { capPerJob, monthlyMax, spend };
   };
 
-  const addSpend = async (credits: number) => {
+  const addSpend = async (svc: any, credits: number) => {
     try {
-      const cur = JSON.parse(await setting('render_spend', '{}') || '{}');
+      const cur = JSON.parse(await setting(svc, 'render_spend', '{}') || '{}');
       const month = new Date().toISOString().slice(0, 7);
       const creditsNow = Number(cur.credits || 0) + Number(credits);
       const rec = await svc.entities.SystemSettings.list({ filter: { key: 'render_spend' }, limit: 1 });
@@ -111,7 +111,7 @@ export function renderGatewayHandler(base44: any) {
     return reqBody;
   };
 
-  const gwPost = async (reqBody: any) => {
+  const gwPost = async (svc: any, reqBody: any) => {
     const gw = svc.aiGateway.connection();
     const res = await fetch(`${gw.baseURL}/videos`, {
       method: 'POST',
@@ -125,7 +125,7 @@ export function renderGatewayHandler(base44: any) {
     return { http: res.status, data, id: data?.id || locId || '' };
   };
 
-  const gwGet = async (videoId: string) => {
+  const gwGet = async (svc: any, videoId: string) => {
     const gw = svc.aiGateway.connection();
     const res = await fetch(`${gw.baseURL}/videos/${videoId}`, {
       headers: { ...gw.headers, Authorization: `Bearer ${gw.token}` },
@@ -141,11 +141,11 @@ export function renderGatewayHandler(base44: any) {
       const body = await req.json().catch(() => ({}));
       const action = String(body.action || '');
 
-      if (!(await authed(req))) return json({ ok: false, error: 'unauthorized: x-api-key חסר או שגוי' }, 401);
+      if (!(await authed(svc, req))) return json({ ok: false, error: 'unauthorized: x-api-key חסר או שגוי' }, 401);
 
       // ══════════ info ══════════
       if (action === 'info' || action === '' ) {
-        const bud = await budgetState();
+        const bud = await budgetState(svc);
         return json({
           ok: true, service: 'shimi-render-gateway', version: '1.0',
           how_it_works: 'כל רינדר מחויב בקרדיטי האינטגרציה של האפליקציה שפרסה את הפונקציה',
@@ -159,7 +159,7 @@ export function renderGatewayHandler(base44: any) {
       // ══════════ quote (dry_run — בלי הוצאה) ══════════
       if (action === 'quote') {
         const model = MODEL_MAP[String(body.model || '')] || DEFAULT_MODEL;
-        const r = await gwPost({ ...buildRequest(body, model), dry_run: true });
+        const r = await gwPost(svc, { ...buildRequest(body, model), dry_run: true });
         return json({ ok: r.http === 200, model, quote: r.data }, r.http === 200 ? 200 : r.http);
       }
 
@@ -167,17 +167,17 @@ export function renderGatewayHandler(base44: any) {
       if (action === 'video_start') {
         if (!body.prompt) return json({ ok: false, error: 'prompt required' }, 400);
         const model = MODEL_MAP[String(body.model || '')] || DEFAULT_MODEL;
-        const bud = await budgetState();
+        const bud = await budgetState(svc);
         if (bud.spend >= bud.monthlyMax) return json({ ok: false, error: 'monthly_budget_reached', spend: bud.spend, cap: bud.monthlyMax }, 429);
 
         const reqBody = buildRequest(body, model);
-        const quote = await gwPost({ ...reqBody, dry_run: true });
+        const quote = await gwPost(svc, { ...reqBody, dry_run: true });
         const cost = Number(quote?.data?.estimated_base44_credits ?? quote?.data?.usage?.base44_credits ?? REFERENCE_PRICING[model] ?? 400);
         if (cost > bud.capPerJob) return json({ ok: false, error: 'job_budget_exceeded', cost, cap: bud.capPerJob }, 429);
 
-        const r = await gwPost(reqBody);
+        const r = await gwPost(svc, reqBody);
         if ((r.http === 200 || r.http === 201 || r.http === 202) && r.id) {
-          await addSpend(cost);
+          await addSpend(svc, cost);
           return json({ ok: true, video_id: r.id, model, seconds: reqBody.seconds, quoted_credits: cost, next: `video_status עם video_id=${r.id}` });
         }
         return json({ ok: false, error: `gateway_http_${r.http}`, detail: String(r.data?.error?.message || r.data?._raw || '').slice(0, 200), hint: 'אם CREDIT_LIMIT_REACHED — קרדיטי האינטגרציה של האפליקציה המפעילה מוצו' }, 502);
@@ -187,7 +187,7 @@ export function renderGatewayHandler(base44: any) {
       if (action === 'video_status') {
         const vid = String(body.video_id || '');
         if (!vid) return json({ ok: false, error: 'video_id required' }, 400);
-        const r = await gwGet(vid);
+        const r = await gwGet(svc, vid);
         const d = r.data || {};
         const done = String(d.status || d.state || '') === 'completed' || !!d.video_url || !!d.url;
         return json({
@@ -200,8 +200,8 @@ export function renderGatewayHandler(base44: any) {
 
       // ══════════ bridge_run — גשר תור הסטודיו ══════════
       if (action === 'bridge_run') {
-        const studioBase = String(body.studio_base || await setting('render_studio_base', 'https://shimi-studio.base44.app'));
-        const studioKey = String(body.studio_key || await setting('render_studio_key', ''));
+        const studioBase = String(body.studio_base || await setting(svc, 'render_studio_base', 'https://shimi-studio.base44.app'));
+        const studioKey = String(body.studio_key || await setting(svc, 'render_studio_key', ''));
         const maxJobs = Math.min(Number(body.max_jobs || 1), 3);
 
         const apiPost = async (payload: any) => {
@@ -219,23 +219,23 @@ export function renderGatewayHandler(base44: any) {
 
           const model = MODEL_MAP[String(((job.parameters || '') + '').match(/"(?:engine|model)"\s*:\s*"([^"]+)"/)?.[1] || '')] || DEFAULT_MODEL;
           const reqBody = buildRequest(job, model);
-          const bud = await budgetState();
+          const bud = await budgetState(svc);
           if (bud.spend >= bud.monthlyMax) { await apiPost({ action: 'release', job_id: job.id }); break; }
-          const quote = await gwPost({ ...reqBody, dry_run: true });
+          const quote = await gwPost(svc, { ...reqBody, dry_run: true });
           const cost = Number(quote?.data?.estimated_base44_credits ?? quote?.data?.usage?.base44_credits ?? REFERENCE_PRICING[model] ?? 400);
           if (cost > bud.capPerJob) {
             await apiPost({ action: 'fail', job_id: job.id, error: `bridge_budget_exceeded: ${cost} > ${bud.capPerJob}` });
             claimed.push({ id: job.id, result: 'rejected_budget' }); continue;
           }
-          const r = await gwPost(reqBody);
+          const r = await gwPost(svc, reqBody);
           if (r.id) {
-            await addSpend(cost);
+            await addSpend(svc, cost);
             await apiPost({ action: 'update', job_id: job.id, status: 'processing', worker_id: 'render-bridge', progress: 10, workflow_id: r.id });
             // מעקב עד סיום (עד 5 דק')
             let outUrl: string | null = null;
             for (let p = 0; p < 30; p++) {
               await new Promise((res) => setTimeout(res, 10000));
-              const st = await gwGet(r.id);
+              const st = await gwGet(svc, r.id);
               const d = st.data || {};
               outUrl = d.video_url || d.url || d.output_url || null;
               if (String(d.status || d.state || '').match(/complete|succeed|done/i) || outUrl) break;
