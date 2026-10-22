@@ -190,9 +190,10 @@ export const netBoardHandler = (createClientFromRequest) => async (req) => {
             if (action === 'health' || action === 'version') {
                 let treasury_sgc = null;
                 try {
-                    const t = (await db.NetBoardAgent.list({ filter: { name: TREASURY_AGENT } })); // תבנית SDK מוכחת (jobApi)
+                    const raw = await db.NetBoardAgent.list({ filter: { name: TREASURY_AGENT } }); // תבנית SDK מוכחת (jobApi)
                     _nbReadsTotal++;
                     _nbReads++;
+                    const t = Array.isArray(raw) ? raw : raw?.data || raw?.items || raw?.records || []; // פריקת עטיפת list (asArr, jobApi)
                     treasury_sgc = t && t.length ? t[0].credits : null;
                 }
                 catch (e) {

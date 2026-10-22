@@ -192,8 +192,9 @@ export const netBoardHandler = (createClientFromRequest: any) => async (req: Req
     if (action === 'health' || action === 'version') {
       let treasury_sgc = null;
       try {
-        const t = (await db.NetBoardAgent.list({ filter: { name: TREASURY_AGENT } })) as any[]; // תבנית SDK מוכחת (jobApi)
+        const raw = await db.NetBoardAgent.list({ filter: { name: TREASURY_AGENT } }); // תבנית SDK מוכחת (jobApi)
         _nbReadsTotal++; _nbReads++;
+        const t = Array.isArray(raw) ? raw : (raw as any)?.data || (raw as any)?.items || (raw as any)?.records || []; // פריקת עטיפת list (asArr, jobApi)
         treasury_sgc = t && t.length ? t[0].credits : null;
       } catch (e) { treasury_sgc = null; }
       return json({ ok: true, board: 'shimi-network', version: VERSION, server_time: nowISO(), treasury_sgc, reads: _nbReadsTotal });
