@@ -47,7 +47,11 @@ const json = (o: any, status = 200) => new Response(JSON.stringify(o), { status,
 const asArr = (x: any): any[] => Array.isArray(x) ? x : (x?.data || x?.items || x?.records || []);
 
 export function renderGatewayHandler(base44: any) {
-  const svc = base44.asServiceRole;
+  // תמיכה בשני סגנונות wrapper: renderGatewayHandler(createClientFromRequest) או renderGatewayHandler(client)
+  const svcOf = (req: Request) => {
+    const client = typeof base44 === 'function' ? base44(req) : base44;
+    return client.asServiceRole;
+  };
 
   const setting = async (key: string, dflt: string): Promise<string> => {
     try {
@@ -133,6 +137,7 @@ export function renderGatewayHandler(base44: any) {
   return async (req: Request): Promise<Response> => {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     try {
+      const svc = svcOf(req);
       const body = await req.json().catch(() => ({}));
       const action = String(body.action || '');
 
