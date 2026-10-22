@@ -27,7 +27,7 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   const base44 = createClientFromRequest(req);
   const svc = base44.asServiceRole;
-  const db = svc;
+  const db = svc.entities;
   let body: any = {};
   try { body = await req.json(); } catch { /* גוף ריק מותר בבדיקות חיות */ }
   const action = String(body.action || '');
