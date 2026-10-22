@@ -192,10 +192,12 @@ export const netBoardHandler = (createClientFromRequest: any) => async (req: Req
     if (action === 'health' || action === 'version') {
       let treasury_sgc = null;
       try {
-        const raw = await db.NetBoardAgent.list({ filter: { name: TREASURY_AGENT } }); // תבנית SDK מוכחת (jobApi)
+        // קריאת list בודדת מוכחת ב-SDK 0.8.31 (ה-wrapper של הלוח); הפילטר הממוקד עובד רק ב-SDK 0.8.53 (jobApi) — לא משדרגים SDK ללוח חי
+        const raw: any = await db.NetBoardAgent.list({});
         _nbReadsTotal++; _nbReads++;
-        const t = Array.isArray(raw) ? raw : (raw as any)?.data || (raw as any)?.items || (raw as any)?.records || []; // פריקת עטיפת list (asArr, jobApi)
-        treasury_sgc = t && t.length ? t[0].credits : null;
+        const agents = Array.isArray(raw) ? raw : raw?.data || raw?.items || raw?.records || [];
+        const t = agents.find((x: any) => String(x.name) === TREASURY_AGENT);
+        treasury_sgc = t ? t.credits : null;
       } catch (e) { treasury_sgc = null; }
       return json({ ok: true, board: 'shimi-network', version: VERSION, server_time: nowISO(), treasury_sgc, reads: _nbReadsTotal });
     }
