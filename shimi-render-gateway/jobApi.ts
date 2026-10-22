@@ -20,6 +20,9 @@ const sha256 = async (s: string) => {
 
 const nowISO = () => new Date().toISOString();
 
+// SDK 0.8.53: list() מחזיר אובייקט עטוף (לא מערך) — פריקה אחידה
+const asArr = (x: any): any[] => (Array.isArray(x) ? x : x?.data || x?.items || x?.records || []);
+
 const MODELS = ['veo', 'veo_lite', 'seedance', 'seedance_fast', 'kling', 'minimax', 'grok'];
 const MAX_QUEUED_PER_AGENT = 5;
 
@@ -41,8 +44,8 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
       const hash = await sha256(nbp);
       let tk: any = null;
       try {
-        const tokens = await db.NetBoardToken.list({}) as any[];
-        tk = (tokens as any[]).find((x: any) => String(x.token_hash) === hash && String(x.status) === 'active') || null;
+        const tokens = asArr(await db.NetBoardToken.list({ filter: { token_hash: hash } }) as any);
+        tk = tokens.find((x: any) => String(x.token_hash) === hash && String(x.status) === 'active') || null;
       } catch { tk = null; }
       if (!tk) return json({ ok: false, error: 'טוקן nbp- לא תקין או מבוטל' }, 401);
       const agent = String(tk.agent || '').trim() || String(body.agent_name || '').trim();
@@ -50,8 +53,8 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
       // יצירת/רענון מפתח רינדור אישי (הרשומה האחרונה מנצחת)
       const newKey = 'rnet-' + crypto.randomUUID().replace(/-/g, '');
       const keyHash = await sha256(newKey);
-      const peers = await db.RenderPeer.list({}) as any[];
-      const existing = (peers as any[]).find((p: any) => String(p.agent_name) === agent);
+      const peers = asArr(await db.RenderPeer.list({ filter: { agent_name: agent } }) as any);
+      const existing = peers.find((p: any) => String(p.agent_name) === agent);
       if (existing) {
         await db.RenderPeer.update(existing.id, { key_hash: keyHash, status: 'active', last_seen: nowISO() });
       } else {
@@ -69,8 +72,8 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
     const keyHash = await sha256(apiKey);
     let peer: any = null;
     try {
-      const peers = await db.RenderPeer.list({}) as any[];
-      peer = (peers as any[]).find((p: any) => String(p.key_hash) === keyHash && String(p.status) === 'active') || null;
+      const peers = asArr(await db.RenderPeer.list({ filter: { key_hash: keyHash } }) as any);
+      peer = peers.find((p: any) => String(p.key_hash) === keyHash && String(p.status) === 'active') || null;
     } catch { peer = null; }
     if (!peer) return json({ ok: false, error: 'unauthorized: מפתח rnet חסר או שגוי (הרשם עם action=register)' }, 401);
     await db.RenderPeer.update(peer.id, { last_seen: nowISO() });
@@ -87,7 +90,7 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
       const seconds = Math.min(Math.max(Number(body.seconds || 8), 1), 16);
       const priority = Math.min(Math.max(Number(body.priority || 0), 0), 9);
       // מגבלת תור פר-עמית
-      const queued = (await db.RenderJob.list({}) as any[]).filter((j: any) => String(j.status) === 'queued' && String(j.created_by_name) === me);
+      const queued = asArr(await db.RenderJob.list({ filter: { status: 'queued' } }) as any).filter((j: any) => String(j.created_by_name) === me);
       if (queued.length >= MAX_QUEUED_PER_AGENT) return json({ ok: false, error: 'מגבלה: ' + MAX_QUEUED_PER_AGENT + ' ג\'ובים בתור בו-זמנית לכל סוכן' }, 429);
       const parameters = JSON.stringify({
         engine: model,
@@ -116,7 +119,7 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
     // ---------- claim: עמית עם קרדיטים מרים ג'וב (פרוטוקול bridge_run) ----------
     if (action === 'claim') {
       const workerId = String(body.worker_id || me);
-      const all = await db.RenderJob.list({}) as any[];
+      const all = asArr(await db.RenderJob.list({ filter: { status: 'queued' } }) as any);
       const candidates = (all as any[])
         .filter((j: any) => String(j.status) === 'queued')
         .sort((a: any, b: any) => (Number(b.priority || 0) - Number(a.priority || 0)) || String(a.created_date).localeCompare(String(b.created_date)));
@@ -146,8 +149,8 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
     // ---------- עדכון/סיום/שחרור/כישלון ----------
     const jobId = String(body.job_id || '');
     if (!jobId) return json({ ok: false, error: 'job_id חובה' }, 400);
-    const jobs = await db.RenderJob.list({}) as any[];
-    const jobRec = (jobs as any[]).find((j: any) => j.id === jobId);
+    const jobs = asArr(await db.RenderJob.list({ filter: { id: jobId } }) as any);
+    const jobRec = jobs.find((j: any) => j.id === jobId);
     if (!jobRec) return json({ ok: false, error: 'ג\'וב לא נמצא: ' + jobId }, 404);
 
     if (action === 'update') {
@@ -178,14 +181,14 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
 
     // ---------- status: מצב התור והעמיתים ----------
     if (action === 'status' || action === '') {
-      const all = await db.RenderJob.list({}) as any[];
-      const peers = await db.RenderPeer.list({}) as any[];
+      const all = asArr(await db.RenderJob.list({}) as any);
+      const peers = asArr(await db.RenderPeer.list({}) as any);
       const byStatus = (s: string) => (all as any[]).filter((j: any) => String(j.status) === s);
       return json({
         ok: true,
         service: 'shimi-render-network v1.0 (jobApi)',
         queue: { queued: byStatus('queued').length, processing: byStatus('processing').length, done: byStatus('done').length, failed_recent: (all as any[]).filter((j: any) => String(j.status) === 'failed').length },
-        peers: (peers as any[]).filter((p: any) => String(p.status) === 'active').map((p: any) => ({ agent: p.agent_name, jobs_completed: Number(p.jobs_completed || 0), credits_spent: Number(p.credits_spent || 0), last_seen: p.last_seen })),
+        peers: (peers).filter((p: any) => String(p.status) === 'active').map((p: any) => ({ agent: p.agent_name, jobs_completed: Number(p.jobs_completed || 0), credits_spent: Number(p.credits_spent || 0), last_seen: p.last_seen })),
         pending: byStatus('queued').slice(0, 10).map((j: any) => ({ id: j.id, by: j.created_by_name, priority: j.priority, prompt: String(j.prompt || '').slice(0, 60) })),
       });
     }
