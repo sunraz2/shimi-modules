@@ -78,6 +78,7 @@ const netBoardHandler = (createClientFromRequest) => async (req) => {
         last_active: nowISO(),
         notes: "\u05E7\u05D5\u05E4\u05EA \u05D4\u05E8\u05E9\u05EA \u2014 \u05DE\u05D0\u05D2\u05E8 \u05D3\u05DE\u05D9 \u05D4\u05EA\u05E4\u05D9\u05E1\u05D4; \u05DE\u05E9\u05DC\u05DE\u05EA \u05D1\u05D5\u05E0\u05D5\u05E1 \u05D4\u05E6\u05DC\u05D7\u05D4 \u05DC\u05DE\u05E6\u05DC\u05D9\u05D7\u05D9\u05DD (\u05DC\u05DC\u05D0 \u05D1\u05D5\u05E0\u05D5\u05E1 \u05D4\u05E8\u05E9\u05DE\u05D4)"
       });
+      bustAgents(); // v1.18.1 (\u05E1\u05E7\u05D9\u05E8\u05EA \u05E8\u05D0\u05E9\u05D9 A)
     }
     return t;
   };
@@ -110,12 +111,14 @@ const netBoardHandler = (createClientFromRequest) => async (req) => {
           const treasury = await ensureTreasury();
           if (Number(treasury.credits || 0) >= TREASURY_BONUS) {
             await db.NetBoardAgent.update(treasury.id, { credits: Number(treasury.credits) - TREASURY_BONUS, last_active: nowISO() });
+            treasury.credits = Number(treasury.credits) - TREASURY_BONUS; // v1.18.1
             bustAgents();
             await tx(TREASURY_AGENT, worker, TREASURY_BONUS, "treasury_bonus", t.id, "\u05E1\u05D5\u05D5\u05D9\u05E4 72\u05E9 \u2014 \u05D1\u05D5\u05E0\u05D5\u05E1 \u05D4\u05E6\u05DC\u05D7\u05D4");
             bonus = TREASURY_BONUS;
           }
           if (Number(treasury.credits || 0) >= CLAIM_COST) {
             await db.NetBoardAgent.update(treasury.id, { credits: Number(treasury.credits) - CLAIM_COST, last_active: nowISO() });
+            treasury.credits = Number(treasury.credits) - CLAIM_COST; // v1.18.1
             bustAgents();
             await tx(TREASURY_AGENT, worker, CLAIM_COST, "claim_fee_refund", t.id, "\u05E1\u05D5\u05D5\u05D9\u05E4 72\u05E9 \u2014 \u05D4\u05D7\u05D6\u05E8 \u05D3\u05DE\u05D9 \u05EA\u05E4\u05D9\u05E1\u05D4");
             claimRefund2 = CLAIM_COST;
@@ -199,6 +202,9 @@ const netBoardHandler = (createClientFromRequest) => async (req) => {
       const approvedCount = await autoApproveSweep(tasksRaw);
       if (approvedCount > 0) {
         tasksRaw = await db.NetBoardTask.list({});
+        agentsRaw = await db.NetBoardAgent.list({}); // v1.18.1 (\u05E1\u05E7\u05D9\u05E8\u05EA \u05E8\u05D0\u05E9\u05D9 B): \u05E8\u05E2\u05E0\u05D5\u05DF \u05D9\u05EA\u05E8\u05D5\u05EA \u05E1\u05D5\u05DB\u05E0\u05D9\u05DD \u05D0\u05D7\u05E8\u05D9 \u05D0\u05D9\u05E9\u05D5\u05E8 \u05E1\u05D5\u05D5\u05D9\u05E4
+        _nbReadsTotal++;
+        _nbReads++;
         _nbReadsTotal++;
         _nbReads++;
       }
@@ -568,6 +574,7 @@ const netBoardHandler = (createClientFromRequest) => async (req) => {
           const treasury = await ensureTreasury();
           if (Number(treasury.credits || 0) >= TREASURY_BONUS) {
             await db.NetBoardAgent.update(treasury.id, { credits: Number(treasury.credits) - TREASURY_BONUS, last_active: nowISO() });
+            treasury.credits = Number(treasury.credits) - TREASURY_BONUS; // v1.18.1
             bustAgents();
             await tx(TREASURY_AGENT, worker, TREASURY_BONUS, "treasury_bonus", taskId, "\u05D1\u05D5\u05E0\u05D5\u05E1 \u05D4\u05E6\u05DC\u05D7\u05D4 \u05D1\u05D0\u05D9\u05E9\u05D5\u05E8");
             treasuryBonus = TREASURY_BONUS;
@@ -575,6 +582,7 @@ const netBoardHandler = (createClientFromRequest) => async (req) => {
           let claimRefund2 = 0;
           if (Number(treasury.credits || 0) >= CLAIM_COST) {
             await db.NetBoardAgent.update(treasury.id, { credits: Number(treasury.credits) - CLAIM_COST, last_active: nowISO() });
+            treasury.credits = Number(treasury.credits) - CLAIM_COST; // v1.18.1
             bustAgents();
             await tx(TREASURY_AGENT, worker, CLAIM_COST, "claim_fee_refund", taskId, "\u05D4\u05D7\u05D6\u05E8 \u05D3\u05DE\u05D9 \u05EA\u05E4\u05D9\u05E1\u05D4 \u05D1\u05D0\u05D9\u05E9\u05D5\u05E8");
             claimRefund2 = CLAIM_COST;

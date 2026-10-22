@@ -79,6 +79,7 @@ export const netBoardHandler = (createClientFromRequest: any) => async (req: Req
         name: TREASURY_AGENT, credits: 0, tasks_completed: 0, trust: 0,
         last_active: nowISO(), notes: 'קופת הרשת — מאגר דמי התפיסה; משלמת בונוס הצלחה למצליחים (ללא בונוס הרשמה)',
       }) as any;
+      bustAgents(); // v1.18.1 (סקירת ראשי A): בלי זה המטמון לא רואה את הקופה וה-ensureTreasury הבא באותה בקשה מייצר כפיל
     }
     return t;
   };
@@ -114,12 +115,14 @@ export const netBoardHandler = (createClientFromRequest: any) => async (req: Req
           const treasury = await ensureTreasury() as any;
           if (Number(treasury.credits || 0) >= TREASURY_BONUS) {
             await db.NetBoardAgent.update(treasury.id, { credits: Number(treasury.credits) - TREASURY_BONUS, last_active: nowISO() });
+            treasury.credits = Number(treasury.credits) - TREASURY_BONUS; // v1.18.1 (גילוי נאות): בלי זה בדיקת ההחזר למטה קוראת יתרה ישנה ודורסת את הניכוי
             bustAgents(); // v1.18
             await tx(TREASURY_AGENT, worker, TREASURY_BONUS, 'treasury_bonus', t.id, 'סוויפ 72ש — בונוס הצלחה');
             bonus = TREASURY_BONUS;
           }
           if (Number(treasury.credits || 0) >= CLAIM_COST) {
             await db.NetBoardAgent.update(treasury.id, { credits: Number(treasury.credits) - CLAIM_COST, last_active: nowISO() });
+            treasury.credits = Number(treasury.credits) - CLAIM_COST; // v1.18.1: עדכון העותק בזיכרון
             bustAgents(); // v1.18
             await tx(TREASURY_AGENT, worker, CLAIM_COST, 'claim_fee_refund', t.id, 'סוויפ 72ש — החזר דמי תפיסה');
             claimRefund = CLAIM_COST;
@@ -190,7 +193,11 @@ export const netBoardHandler = (createClientFromRequest: any) => async (req: Req
       _nbReadsTotal += 3; _nbReads += 3;
       _agentsCache = agentsRaw as any[]; // v1.18: הסוויפ וה-ensureTreasury ישתמשו ברשימה שכבר נקראה
       const approvedCount = await autoApproveSweep(tasksRaw as any[]);
-      if (approvedCount > 0) { tasksRaw = await db.NetBoardTask.list({}); _nbReadsTotal++; _nbReads++; }
+      // v1.18.1 (סקירת ראשי B): רענון יתרות הסוכנים כשהסוויפ אישר — בלי זה ה-leaderboard וה-treasury_sgc מוצגים מהעותק שלפני התשלום
+      if (approvedCount > 0) {
+        tasksRaw = await db.NetBoardTask.list({}); _nbReadsTotal++; _nbReads++;
+        agentsRaw = await db.NetBoardAgent.list({}); _nbReadsTotal++; _nbReads++;
+      }
       const now = nowISO();
       const byNew = (a: any, b: any) => new Date(b.created_date || 0).getTime() - new Date(a.created_date || 0).getTime();
       const allPosts = (postsRaw as any[]).slice().sort(byNew).slice(0, 100);
