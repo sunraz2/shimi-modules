@@ -90,7 +90,7 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
       const seconds = Math.min(Math.max(Number(body.seconds || 8), 1), 16);
       const priority = Math.min(Math.max(Number(body.priority || 0), 0), 9);
       // מגבלת תור פר-עמית
-      const queued = asArr(await db.RenderJob.list({ filter: { status: 'queued' } }) as any).filter((j: any) => String(j.created_by_name) === me);
+      const queued = asArr(await db.RenderQueue.list({}) as any).filter((j: any) => String(j.status) === 'queued' && String(j.created_by_name) === me);
       if (queued.length >= MAX_QUEUED_PER_AGENT) return json({ ok: false, error: 'מגבלה: ' + MAX_QUEUED_PER_AGENT + ' ג\'ובים בתור בו-זמנית לכל סוכן' }, 429);
       const parameters = {
         engine: model,
@@ -102,15 +102,14 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
         negative_prompt: body.negative_prompt || null,
         generate_audio: body.generate_audio !== false,
       };
-      const job = await db.RenderJob.create({
+      const job = await db.RenderQueue.create({
         prompt: prompt.slice(0, 10000),
         parameters,
-        job_type: 'video',
         status: 'queued',
         priority,
         progress: 0,
         created_by_name: me,
-        client_id: String(body.for_agent || me),
+        submitted_for: String(body.for_agent || me),
         notes: 'הוגש לתור הרינדור השיתופי 22/10',
       });
       return json({ ok: true, job_id: job.id, status: 'queued', model, seconds, position: queued.length + 1, next: 'עקוב עם action=status, או חכה שעמית עם קרדיטים ירים (claim)' });
@@ -119,7 +118,7 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
     // ---------- claim: עמית עם קרדיטים מרים ג'וב (פרוטוקול bridge_run) ----------
     if (action === 'claim') {
       const workerId = String(body.worker_id || me);
-      const all = asArr(await db.RenderJob.list({ filter: { status: 'queued' } }) as any);
+      const all = asArr(await db.RenderQueue.list({}) as any);
       const candidates = (all as any[])
         .filter((j: any) => String(j.status) === 'queued')
         .sort((a: any, b: any) => (Number(b.priority || 0) - Number(a.priority || 0)) || String(a.created_date).localeCompare(String(b.created_date)));
@@ -127,7 +126,7 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
       const job = candidates[0];
       const rawParams: any = job.parameters;
       const params = typeof rawParams === 'string' ? JSON.parse(rawParams || '{}') : (rawParams || {});
-      await db.RenderJob.update(job.id, { status: 'processing', worker_id: workerId, started_at: nowISO(), progress: 1 });
+      await db.RenderQueue.update(job.id, { status: 'processing', worker_id: workerId, started_at: nowISO(), progress: 1 });
       return json({
         ok: true,
         job: {
@@ -149,12 +148,13 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
 
     // ---------- status: מצב התור והעמיתים (קריאות מסוננות — חוק תעבורה v2.0.7) ----------
     if (action === 'status' || action === '') {
-      const queued = asArr(await db.RenderJob.list({ filter: { status: 'queued' } }) as any);
-      const processing = asArr(await db.RenderJob.list({ filter: { status: 'processing' } }) as any);
+      const all = asArr(await db.RenderQueue.list({}) as any); // טבלה ייעודית — קריאה אחת
+      const queued = all.filter((j: any) => String(j.status) === 'queued');
+      const processing = all.filter((j: any) => String(j.status) === 'processing');
       const peers = asArr(await db.RenderPeer.list({}) as any); // טבלה קטנה
       return json({
         ok: true,
-        service: 'shimi-render-network v1.0.3 (jobApi)',
+        service: 'shimi-render-network v1.0.5 (jobApi)',
         queue: { queued: queued.length, processing: processing.length },
         peers: (peers).filter((p: any) => String(p.status) === 'active').map((p: any) => ({ agent: p.agent_name, jobs_completed: Number(p.jobs_completed || 0), credits_spent: Number(p.credits_spent || 0), last_seen: p.last_seen })),
         pending: queued.slice(0, 10).map((j: any) => ({ id: j.id, by: j.created_by_name, priority: j.priority, prompt: String(j.prompt || '').slice(0, 60) })),
@@ -164,7 +164,7 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
     // ---------- עדכון/סיום/שחרור/כישלון ----------
     const jobId = String(body.job_id || '');
     if (!jobId) return json({ ok: false, error: 'job_id חובה' }, 400);
-    const jobs = asArr(await db.RenderJob.list({ filter: { id: jobId } }) as any);
+    const jobs = asArr(await db.RenderQueue.list({}) as any);
     const jobRec = jobs.find((j: any) => j.id === jobId);
     if (!jobRec) return json({ ok: false, error: 'ג\'וב לא נמצא: ' + jobId }, 404);
 
@@ -173,12 +173,12 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
       if (body.status) patch.status = String(body.status);
       if (body.progress !== undefined) patch.progress = Number(body.progress);
       if (body.workflow_id) patch.workflow_id = String(body.workflow_id);
-      await db.RenderJob.update(jobId, patch);
+      await db.RenderQueue.update(jobId, patch);
       return json({ ok: true });
     }
     if (action === 'complete') {
       if (!body.output_url) return json({ ok: false, error: 'output_url חובה לסיום' }, 400);
-      await db.RenderJob.update(jobId, { status: 'done', output_url: String(body.output_url), completed_at: nowISO(), progress: 100, worker_id: String(body.worker_id || jobRec.worker_id || me) });
+      await db.RenderQueue.update(jobId, { status: 'done', output_url: String(body.output_url), completed_at: nowISO(), progress: 100, worker_id: String(body.worker_id || jobRec.worker_id || me) });
       await db.RenderPeer.update(peer.id, {
         jobs_completed: Number(peer.jobs_completed || 0) + 1,
         credits_spent: Number(peer.credits_spent || 0) + Number(body.credits_spent || 0),
@@ -186,11 +186,11 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
       return json({ ok: true, note: 'תודה! הקרדיטים שרכשת נרשמו לזכותך במאזן הרשת' });
     }
     if (action === 'fail') {
-      await db.RenderJob.update(jobId, { status: 'queued', error_message: String(body.error || 'unknown').slice(0, 500), worker_id: '', progress: 0, notes: 'הוחזר לתור אחרי כישלון עמית: ' + String(body.error || '').slice(0, 120) });
+      await db.RenderQueue.update(jobId, { status: 'queued', error_message: String(body.error || 'unknown').slice(0, 500), worker_id: '', progress: 0, notes: 'הוחזר לתור אחרי כישלון עמית: ' + String(body.error || '').slice(0, 120) });
       return json({ ok: true, note: 'הג\'וב הוחזר לתור לעמית הבא' });
     }
     if (action === 'release') {
-      if (String(jobRec.status) === 'processing') await db.RenderJob.update(jobId, { status: 'queued', worker_id: '', progress: 0 });
+      if (String(jobRec.status) === 'processing') await db.RenderQueue.update(jobId, { status: 'queued', worker_id: '', progress: 0 });
       return json({ ok: true });
     }
 
