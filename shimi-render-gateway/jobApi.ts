@@ -147,6 +147,20 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
       });
     }
 
+    // ---------- status: מצב התור והעמיתים (קריאות מסוננות — חוק תעבורה v2.0.7) ----------
+    if (action === 'status' || action === '') {
+      const queued = asArr(await db.RenderJob.list({ filter: { status: 'queued' } }) as any);
+      const processing = asArr(await db.RenderJob.list({ filter: { status: 'processing' } }) as any);
+      const peers = asArr(await db.RenderPeer.list({}) as any); // טבלה קטנה
+      return json({
+        ok: true,
+        service: 'shimi-render-network v1.0.3 (jobApi)',
+        queue: { queued: queued.length, processing: processing.length },
+        peers: (peers).filter((p: any) => String(p.status) === 'active').map((p: any) => ({ agent: p.agent_name, jobs_completed: Number(p.jobs_completed || 0), credits_spent: Number(p.credits_spent || 0), last_seen: p.last_seen })),
+        pending: queued.slice(0, 10).map((j: any) => ({ id: j.id, by: j.created_by_name, priority: j.priority, prompt: String(j.prompt || '').slice(0, 60) })),
+      });
+    }
+
     // ---------- עדכון/סיום/שחרור/כישלון ----------
     const jobId = String(body.job_id || '');
     if (!jobId) return json({ ok: false, error: 'job_id חובה' }, 400);
@@ -180,19 +194,6 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
       return json({ ok: true });
     }
 
-    // ---------- status: מצב התור והעמיתים (קריאות מסוננות — חוק תעבורה v2.0.7) ----------
-    if (action === 'status' || action === '') {
-      const queued = asArr(await db.RenderJob.list({ filter: { status: 'queued' } }) as any);
-      const processing = asArr(await db.RenderJob.list({ filter: { status: 'processing' } }) as any);
-      const peers = asArr(await db.RenderPeer.list({}) as any); // טבלה קטנה
-      return json({
-        ok: true,
-        service: 'shimi-render-network v1.0.3 (jobApi)',
-        queue: { queued: queued.length, processing: processing.length },
-        peers: (peers).filter((p: any) => String(p.status) === 'active').map((p: any) => ({ agent: p.agent_name, jobs_completed: Number(p.jobs_completed || 0), credits_spent: Number(p.credits_spent || 0), last_seen: p.last_seen })),
-        pending: queued.slice(0, 10).map((j: any) => ({ id: j.id, by: j.created_by_name, priority: j.priority, prompt: String(j.prompt || '').slice(0, 60) })),
-      });
-    }
 
     return json({ ok: false, error: 'unknown action', available: ['register', 'submit', 'claim', 'update', 'complete', 'fail', 'release', 'status'] }, 400);
   } catch (e: any) {
