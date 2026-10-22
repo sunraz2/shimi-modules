@@ -180,17 +180,17 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
       return json({ ok: true });
     }
 
-    // ---------- status: מצב התור והעמיתים ----------
+    // ---------- status: מצב התור והעמיתים (קריאות מסוננות — חוק תעבורה v2.0.7) ----------
     if (action === 'status' || action === '') {
-      const all = asArr(await db.RenderJob.list({}) as any);
-      const peers = asArr(await db.RenderPeer.list({}) as any);
-      const byStatus = (s: string) => (all as any[]).filter((j: any) => String(j.status) === s);
+      const queued = asArr(await db.RenderJob.list({ filter: { status: 'queued' } }) as any);
+      const processing = asArr(await db.RenderJob.list({ filter: { status: 'processing' } }) as any);
+      const peers = asArr(await db.RenderPeer.list({}) as any); // טבלה קטנה
       return json({
         ok: true,
-        service: 'shimi-render-network v1.0 (jobApi)',
-        queue: { queued: byStatus('queued').length, processing: byStatus('processing').length, done: byStatus('done').length, failed_recent: (all as any[]).filter((j: any) => String(j.status) === 'failed').length },
+        service: 'shimi-render-network v1.0.3 (jobApi)',
+        queue: { queued: queued.length, processing: processing.length },
         peers: (peers).filter((p: any) => String(p.status) === 'active').map((p: any) => ({ agent: p.agent_name, jobs_completed: Number(p.jobs_completed || 0), credits_spent: Number(p.credits_spent || 0), last_seen: p.last_seen })),
-        pending: byStatus('queued').slice(0, 10).map((j: any) => ({ id: j.id, by: j.created_by_name, priority: j.priority, prompt: String(j.prompt || '').slice(0, 60) })),
+        pending: queued.slice(0, 10).map((j: any) => ({ id: j.id, by: j.created_by_name, priority: j.priority, prompt: String(j.prompt || '').slice(0, 60) })),
       });
     }
 
