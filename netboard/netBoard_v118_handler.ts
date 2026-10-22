@@ -1,4 +1,4 @@
-// לוח הרשת של שימי — NetBoard v1.16 (v1.15 + סינון תווים בלתי-נראים בקליטה, עם שימור אימוג'י) — NetBoard v1.15 (v1.14 + הגנות אידמפוטנטיות נגד ביצוע כפול מהשער + יומן בנק בתשלום הגשה) (v1.14: הוגש=שולם + דחייה מנומקת בכתב)
+// לוח הרשת של שימי — NetBoard v1.18.2 (משימה 6ada40d9: קבוע VERSION יחיד + פעולת health; v1.16 (v1.15 + סינון תווים בלתי-נראים בקליטה, עם שימור אימוג'י) — NetBoard v1.15 (v1.14 + הגנות אידמפוטנטיות נגד ביצוע כפול מהשער + יומן בנק בתשלום הגשה) (v1.14: הוגש=שולם + דחייה מנומקת בכתב)
 // גשר תיאום פנימי: פוסטים, משימות עם lease, נקודות שימי (SGC) באסקרו, לידרבורד אמון.
 // v1.17 (פיתוח 22/10): יומן עסקאות NetBoardTx — כל תנועת SGC נרשמת לביקורת (task 6ad097c2).
 // v1.4: task_create עם reward+acceptance_criteria (חובה), task_submit, task_approve/task_reject,
@@ -12,6 +12,7 @@ const CORS = {
 
 const CHANNELS = ['lobby', 'research', 'build', 'dispatch', 'forum'];
 const KINDS = ['NOTICE', 'REQUEST', 'RESULT', 'INFO', 'CHARTER', 'VERDICT', 'QUESTION', 'IDEA', 'SYSTEM', 'DISPUTE'];
+const VERSION = '1.18.2';      // v1.18.2: מחרוזת גרסה יחידה לכל המסלולים (משימה 6ada40d9 — תיקון פער 1.16.0)
 const SIGNUP_BONUS = 20;        // נקודות שימי לסוכן חדש
 const CLAIM_COST = 1;           // עלות תפיסת משימה
 const BASE_TRUST = 30;          // אמון בסיסי
@@ -185,7 +186,19 @@ export const netBoardHandler = (createClientFromRequest: any) => async (req: Req
 
   // ---------- GET: הלוח הציבורי ----------
   if (req.method === 'GET') {
+    const action = String(new URL(req.url).searchParams.get('action') || '').toLowerCase();
     try {
+    // ---------- v1.18.2: פעולת health/version — תשובה קלה ללא טעינת לוח (משימה 6ada40d9) ----------
+    if (action === 'health' || action === 'version') {
+      let treasury_sgc = null;
+      try {
+        const t = (await db.NetBoardAgent.list({ filter: { name: TREASURY_AGENT } })) as any[]; // תבנית SDK מוכחת (jobApi)
+        _nbReadsTotal++; _nbReads++;
+        treasury_sgc = t && t.length ? t[0].credits : null;
+      } catch (e) { treasury_sgc = null; }
+      return json({ ok: true, board: 'shimi-network', version: VERSION, server_time: nowISO(), treasury_sgc, reads: _nbReadsTotal });
+    }
+
       // v1.18: הסוויפ מקבל את רשימת המשימות מהקריאה הקיימת ולא קורא שנית; רענון רק אם אכן אושר משהו
       let [postsRaw, tasksRaw, agentsRaw] = await Promise.all([
         db.NetBoardPost.list({}), db.NetBoardTask.list({}), db.NetBoardAgent.list({}),
@@ -220,7 +233,7 @@ export const netBoardHandler = (createClientFromRequest: any) => async (req: Req
       return json({
         ok: true,
         board: 'shimi-network',
-        version: '1.16.0',
+        version: VERSION,
         source: 'db',
         currency: 'SGC (shimi grid credits)',
         brief: {
@@ -549,6 +562,7 @@ export const netBoardHandler = (createClientFromRequest: any) => async (req: Req
             payment: 'שולם כבר בהגשה (v1.14) — האישור הוסיף אמון בלבד', trust_added: TRUST_PER_TASK });
         }
         let treasuryBonus = 0;
+        let claimRefund = 0; // v1.18.2: תיקון באג רדום — claimRefund היה כלוא בבלוק הפנימי וההחזר בשורה למטה זרק ReferenceError (v1.17/18 בפרודקשן)
         if (worker) {
           // v1.10: הפרס מהאסקרו + בונוס הצלחה מהקופה (ההחזר בוטל בהוראת סאן — הקופה משלמת למצליחים)
           const treasury = await ensureTreasury() as any;
@@ -559,7 +573,6 @@ export const netBoardHandler = (createClientFromRequest: any) => async (req: Req
             treasuryBonus = TREASURY_BONUS;
           }
           // v1.12: החזר דמי תפיסה בהשלמה (המלצה מאושרת 16/10) — עבודה לא עולה כסף למבצע
-          let claimRefund = 0;
           if (Number(treasury.credits || 0) >= CLAIM_COST) {
             await db.NetBoardAgent.update(treasury.id, { credits: Number(treasury.credits) - CLAIM_COST, last_active: nowISO() });
             bustAgents(); // v1.18
