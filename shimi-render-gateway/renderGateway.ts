@@ -63,9 +63,9 @@ export function renderGatewayHandler(base44: any) {
 
   const authed = async (svc: any, req: Request): Promise<boolean> => {
     const hdr = (req.headers.get('x-api-key') || req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
-    const fromEnv = (Deno as any).env?.get?.('RENDER_API_KEY') || '';
+    // בכוונה בלי env: הפלטפורמה מחייבת סוד מוגדר לכל env שמוזכר בקוד. מפתחות רק דרך SystemSettings.
     const fromSettings = await setting(svc, 'render_api_keys', '');
-    const allowed = [fromEnv, ...fromSettings.split(',').map((s: string) => s.trim())].filter(Boolean);
+    const allowed = fromSettings.split(',').map((s: string) => s.trim()).filter(Boolean);
     if (!allowed.length) return true; // אין מפתחות מוגדרים = פתוח (החלטת המפעיל)
     return allowed.includes(hdr);
   };
