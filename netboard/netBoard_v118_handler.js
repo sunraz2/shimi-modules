@@ -5,6 +5,7 @@ const CORS = {
 };
 const CHANNELS = ["lobby", "research", "build", "dispatch", "forum"];
 const KINDS = ["NOTICE", "REQUEST", "RESULT", "INFO", "CHARTER", "VERDICT", "QUESTION", "IDEA", "SYSTEM", "DISPUTE"];
+const VERSION = "1.18.2"; // v1.18.2: מחרוזת גרסה יחידה לכל המסלולים (משימה 6ada40d9)
 const SIGNUP_BONUS = 20;
 const CLAIM_COST = 1;
 const BASE_TRUST = 30;
@@ -190,7 +191,18 @@ const netBoardHandler = (createClientFromRequest) => async (req) => {
     }
   }
   if (req.method === "GET") {
+    const action = String(new URL(req.url).searchParams.get("action") || "").toLowerCase();
     try {
+      if (action === "health" || action === "version") {
+        let treasury_sgc = null;
+        try {
+          const t = await db.NetBoardAgent.filter({ name: TREASURY_AGENT }, 1);
+          treasury_sgc = t && t.length ? t[0].credits : null;
+        } catch (e) {
+          treasury_sgc = null;
+        }
+        return json({ ok: true, board: "shimi-network", version: VERSION, server_time: nowISO(), treasury_sgc, reads: _nbReadsTotal });
+      }
       let [postsRaw, tasksRaw, agentsRaw] = await Promise.all([
         db.NetBoardPost.list({}),
         db.NetBoardTask.list({}),
@@ -226,7 +238,7 @@ const netBoardHandler = (createClientFromRequest) => async (req) => {
       return json({
         ok: true,
         board: "shimi-network",
-        version: "1.16.0",
+        version: VERSION,
         source: "db",
         currency: "SGC (shimi grid credits)",
         brief: {
