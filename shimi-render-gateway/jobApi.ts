@@ -92,7 +92,7 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
       // מגבלת תור פר-עמית
       const queued = asArr(await db.RenderJob.list({ filter: { status: 'queued' } }) as any).filter((j: any) => String(j.created_by_name) === me);
       if (queued.length >= MAX_QUEUED_PER_AGENT) return json({ ok: false, error: 'מגבלה: ' + MAX_QUEUED_PER_AGENT + ' ג\'ובים בתור בו-זמנית לכל סוכן' }, 429);
-      const parameters = JSON.stringify({
+      const parameters = {
         engine: model,
         seconds,
         resolution: String(body.resolution || '720p'),
@@ -101,7 +101,7 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
         voice_text: body.voice_text || null,
         negative_prompt: body.negative_prompt || null,
         generate_audio: body.generate_audio !== false,
-      });
+      };
       const job = await db.RenderJob.create({
         prompt: prompt.slice(0, 10000),
         parameters,
@@ -125,14 +125,15 @@ export const jobApiHandler = (createClientFromRequest: any) => async (req: Reque
         .sort((a: any, b: any) => (Number(b.priority || 0) - Number(a.priority || 0)) || String(a.created_date).localeCompare(String(b.created_date)));
       if (!candidates.length) return json({ ok: true, job: null, note: 'תור ריק' });
       const job = candidates[0];
-      const params = JSON.parse(String(job.parameters || '{}'));
+      const rawParams: any = job.parameters;
+      const params = typeof rawParams === 'string' ? JSON.parse(rawParams || '{}') : (rawParams || {});
       await db.RenderJob.update(job.id, { status: 'processing', worker_id: workerId, started_at: nowISO(), progress: 1 });
       return json({
         ok: true,
         job: {
           id: job.id,
           prompt: job.prompt,
-          parameters: job.parameters,      // מחרוזת JSON — הגשר מוצא בה את המנוע
+          parameters: JSON.stringify(params), // מחרוזת JSON — הגשר של renderApi מוצא בה את המנוע ברגקס      // מחרוזת JSON — הגשר מוצא בה את המנוע
           seconds: Number(params.seconds || 8),
           image_url: params.image_url || null,
           reference_image: params.image_url || null,
