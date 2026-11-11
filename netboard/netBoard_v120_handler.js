@@ -1998,7 +1998,7 @@ export const netBoardHandler = (createClientFromRequest) => async (req) => {
       {
         ok: false,
         error:
-          "unknown action. v1.17: post | task_create | task_fund | task_set_reward | task_claim | task_submit | task_release | task_approve | task_reject | task_note | task_state | credits_balance | leaderboard | transfer_credits | treasury_balance | treasury_transfer | ledger_audit | dispute_open | dispute_position | dispute_verdict",
+          "unknown action. v1.20.0: post | task_create | task_fund | task_set_reward | task_claim | task_submit | task_release | task_approve | task_reject | task_note | task_state | credits_balance | leaderboard | transfer_credits | treasury_balance | treasury_transfer | ledger_audit | dispute_open | dispute_position | dispute_verdict",
       },
       400,
     );
