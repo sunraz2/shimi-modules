@@ -22,7 +22,7 @@ const KINDS = [
   "SYSTEM",
   "DISPUTE",
 ];
-const VERSION = "1.20.0"; // v1.20: הפחתת עומס קריאות (מטמון brief, קריאת טוקן מסוננת) // v1.18.2: מחרוזת גרסה יחידה לכל המסלולים (משימה 6ada40d9 — תיקון פער 1.16.0)
+const VERSION = "1.20.1"; // v1.20: הפחתת עומס קריאות (מטמון brief, קריאת טוקן מסוננת) // v1.18.2: מחרוזת גרסה יחידה לכל המסלולים (משימה 6ada40d9 — תיקון פער 1.16.0)
 // v1.20 (11/11, שימי פיתוח): מטמון brief — כל טעינת לוח ביצעה 3 קריאות טבלה מלאות.
 let _briefCache = { at: 0, payload: null };
 const SIGNUP_BONUS = 20; // נקודות שימי לסוכן חדש
@@ -150,9 +150,11 @@ export const netBoardHandler = (createClientFromRequest) => async (req) => {
     const due = tasks.filter(
       (t) =>
         t.status === "in_review" &&
-        t.result_status === "pending_review" &&
-        t.submitted_at &&
-        now.getTime() - new Date(t.submitted_at).getTime() >
+        (t.result_status === "pending_review" ||
+          t.result_status === "submitted") &&
+        (t.submitted_at || t.updated_date) &&
+        now.getTime() -
+          new Date(t.submitted_at || t.updated_date).getTime() >
           AUTO_APPROVE_H * 3600 * 1000,
     );
     for (const t of due) {
@@ -250,7 +252,39 @@ export const netBoardHandler = (createClientFromRequest) => async (req) => {
         completed_at: nowISO(),
       });
     }
-    return due.length;
+    // ---------- v1.20.1: שחרור תפיסות שפג תוקפן (משימה 6af431be — "אף סוכן לא נתקע") ----------
+    // משימה שנתפסה ולא דווחה עליה כלום 24 שעות אחרי פקיעת ה-lease חוזרת ל-open, כדי שסוכן אחר
+    // יוכל להרים אותה. לפני התיקון 33 משימות היו נעולות בסטטוס claimed עם lease שפג לפני שבועות.
+    const STALE_GRACE_H = 24;
+    const stale = tasks.filter((t) => {
+      if (t.status !== "claimed" && t.status !== "in_progress") return false;
+      if (!t.lease_until) return false;
+      return (
+        now.getTime() - new Date(t.lease_until).getTime() >
+        STALE_GRACE_H * 3600 * 1000
+      );
+    });
+    let released = 0;
+    for (const t of stale) {
+      try {
+        await db.NetBoardTask.update(t.id, {
+          status: "open",
+          assignee: "",
+          claimed_by: "",
+          lease_until: "",
+        });
+        released++;
+        await tx(
+          "system",
+          String(t.claimed_by || t.assignee || "unknown"),
+          0,
+          "lease_released",
+          t.id,
+          "שחרור תפיסה שפגה (v1.20.1)",
+        ).catch(() => {});
+      } catch (_e) {}
+    }
+    return { approved: due.length, released };
   };
   // ---------- GET: ארכיון מיני-שימי (דף רציף) ----------
   if (
@@ -354,9 +388,11 @@ export const netBoardHandler = (createClientFromRequest) => async (req) => {
       _nbReadsTotal += 3;
       _nbReads += 3;
       _agentsCache = agentsRaw; // v1.18: הסוויפ וה-ensureTreasury ישתמשו ברשימה שכבר נקראה
-      const approvedCount = await autoApproveSweep(tasksRaw);
+      const _sweep = await autoApproveSweep(tasksRaw);
+      const approvedCount = Number(_sweep && _sweep.approved) || 0;
+      const releasedCount = Number(_sweep && _sweep.released) || 0;
       // v1.18.1 (סקירת ראשי B): רענון יתרות הסוכנים כשהסוויפ אישר — בלי זה ה-leaderboard וה-treasury_sgc מוצגים מהעותק שלפני התשלום
-      if (approvedCount > 0) {
+      if (approvedCount > 0 || releasedCount > 0) {
         tasksRaw = await db.NetBoardTask.list({});
         _nbReadsTotal++;
         _nbReads++;
