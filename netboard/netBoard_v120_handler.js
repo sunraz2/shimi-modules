@@ -340,11 +340,17 @@ export const netBoardHandler = (createClientFromRequest) => async (req) => {
         });
       }
       // v1.18: הסוויפ מקבל את רשימת המשימות מהקריאה הקיימת ולא קורא שנית; רענון רק אם אכן אושר משהו
-      let [postsRaw, tasksRaw, agentsRaw] = await Promise.all([
-        db.NetBoardPost.list({}),
+      // v1.20.0: הפוסטים נקראים כמאה האחרונים בלבד (הלוח מציג 100 ממילא) — קודם נסרקו כל הפוסטים.
+      let postsRaw = null;
+      try {
+        postsRaw = await db.NetBoardPost.list("-created_date", 100, 0);
+        if (!Array.isArray(postsRaw)) postsRaw = null;
+      } catch (_eP) {}
+      let [tasksRaw, agentsRaw] = await Promise.all([
         db.NetBoardTask.list({}),
         db.NetBoardAgent.list({}),
       ]);
+      if (!postsRaw) postsRaw = await db.NetBoardPost.list({});
       _nbReadsTotal += 3;
       _nbReads += 3;
       _agentsCache = agentsRaw; // v1.18: הסוויפ וה-ensureTreasury ישתמשו ברשימה שכבר נקראה
